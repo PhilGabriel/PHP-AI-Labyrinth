@@ -31,6 +31,29 @@ define('LABYRINTH_LOG_VISITS', true);
 // Language / locale for date formatting
 define('LABYRINTH_LOCALE', 'de_DE.UTF-8');
 
+// ============================================================
+// BETA: AI Cost Multiplier Features
+// ============================================================
+
+// Embed a fake GD/SVG chart image on each page.
+// Triggers vision/multimodal processing in AI crawlers (~1k–3k extra tokens per image).
+// Requires chart.php to be accessible at LABYRINTH_CHART_PATH.
+define('LABYRINTH_ENABLE_CHARTS', true);
+
+// URL path to chart.php (must be web-accessible)
+define('LABYRINTH_CHART_PATH', '/research/chart.php');
+
+// Embed a complex inline SVG network graph on each page.
+// Massive token input + triggers deep reasoning to interpret the graph.
+define('LABYRINTH_ENABLE_SVG', true);
+
+// Number of nodes in the SVG graph (more = more tokens)
+define('LABYRINTH_SVG_NODES', 42);
+
+// Embed a logic puzzle on each page (prime / Fibonacci / leap year / max-value).
+// Triggers chain-of-thought reasoning in AI agents before they click.
+define('LABYRINTH_ENABLE_PUZZLES', true);
+
 // ---- Content pools (feel free to extend) ----
 
 $LABYRINTH_TOPICS = [
