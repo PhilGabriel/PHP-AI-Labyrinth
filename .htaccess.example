@@ -1,0 +1,26 @@
+# .htaccess example for PHP AI Labyrinth (Apache)
+#
+# 1. Clean URL rewrite: /research/articles → labyrinth.php
+# 2. Block direct access to config.php
+# 3. Optional caching headers
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Clean URL for the trap — bots see a "normal" path
+    RewriteRule ^research/articles$   /research/articles.php   [L,QSA]
+    RewriteRule ^research/articles/$  /research/articles.php   [L,QSA]
+</IfModule>
+
+# Block direct access to the config file
+<Files "config.php">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+# Optional: let bots cache pages to reduce your server load
+<IfModule mod_headers.c>
+    <FilesMatch "articles\.php$">
+        Header set Cache-Control "public, max-age=3600"
+    </FilesMatch>
+</IfModule>
