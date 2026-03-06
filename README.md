@@ -33,53 +33,134 @@ No database. No dependencies. Drop in two files and go.
 
 ---
 
-## Installation
+## Installation & Setup
 
-### 1. Copy the files
+### 1. Dateien kopieren
 
 ```bash
-# Clone the repo
+# Repo klonen
 git clone https://github.com/PhilGabriel/PHP-AI-Labyrinth.git
 
-# Copy to your project (example path)
+# In dein Projekt kopieren (Beispielpfad)
 cp PHP-AI-Labyrinth/labyrinth.php  /var/www/html/trap/labyrinth.php
 cp PHP-AI-Labyrinth/config.php     /var/www/html/trap/config.php
 ```
 
-### 2. Adjust `config.php`
+### 2. `config.php` anpassen
 
-At minimum, set your base path:
+Mindestens den Base-Path auf deinen tatsächlichen URL-Pfad setzen:
 
+```php
+define('LABYRINTH_BASE_PATH', '/trap/labyrinth.php');
+define('LABYRINTH_SITE_NAME', 'Meine Webseite');
+```
+
+Optional: Topics, Autoren und Absätze in deiner Sprache und Nische eintragen — je glaubwürdiger der Inhalt zum Rest deiner Seite passt, desto effektiver die Falle.
+
+### 3. Einstiegslink auf deiner Seite verstecken
+
+Bots folgen Links — Menschen sehen diesen nicht:
+
+```html
+<!-- Im Footer oder einer beliebigen Seite -->
+<a href="/trap/labyrinth.php" style="display:none" tabindex="-1" aria-hidden="true">.</a>
+```
+
+> **Warum nicht einfach blocken?** Blockieren verrät dem Bot, dass er erkannt wurde. Ein Labyrinth vergeudet still sein Compute-Budget, ohne ihn zu warnen.
+
+### 4. `robots.txt` — den Trap-Pfad *nicht* eintragen
+
+Der Trap-Pfad darf **nicht** unter `Disallow` stehen — sonst überspringen Bots, die `robots.txt` respektieren, die Falle. Nur aggressive Scraper, die `robots.txt` ignorieren, laufen hinein — und genau die sollen rein.
+
+```
+# robots.txt — Trap-Pfad absichtlich nicht disallowed
+User-agent: *
+Disallow: /admin/
+Disallow: /api/
+# /trap/ ist hier bewusst nicht gelistet
+```
+
+Siehe [`robots.txt.example`](robots.txt.example) für ein vollständiges Beispiel.
+
+### 5. Webserver konfigurieren (optional: Clean URLs)
+
+**Apache** — in `.htaccess` oder VHost:
+```apache
+RewriteEngine On
+RewriteRule ^trap/articles$   /trap/labyrinth.php   [L,QSA]
+```
+
+**Nginx** — in der `server`-Block-Konfiguration:
+```nginx
+location /trap/articles {
+    try_files $uri /trap/labyrinth.php?$query_string;
+}
+location ~ /config\.php$ { deny all; }
+```
+
+Damit erscheint der Trap als saubere URL `/trap/articles?p=…&d=…` ohne `.php`-Endung.
+
+---
+
+## WordPress Integration
+
+PHP AI Labyrinth lässt sich in WordPress ohne Plugin einbinden.
+
+### Option A: Eigene PHP-Datei neben WordPress (empfohlen)
+
+WordPress läuft typischerweise im Webroot. Lege `labyrinth.php` und `config.php` einfach in einen Unterordner:
+
+```
+/var/www/html/
+├── wp-config.php         ← WordPress
+├── wp-content/
+├── index.php
+└── trap/
+    ├── labyrinth.php     ← Labyrinth (eigenständig, kein WP-Bootstrap)
+    └── config.php
+```
+
+WordPress wird dabei **nicht** geladen — die Dateien laufen vollkommen unabhängig. Kein Plugin, kein Hook nötig.
+
+In `config.php` setzen:
 ```php
 define('LABYRINTH_BASE_PATH', '/trap/labyrinth.php');
 ```
 
-Optionally replace the German topics, authors and paragraphs with content in your language or niche.
-
-### 3. Add a hidden entry link to your site
-
-The entry point must be invisible to humans but follow-able by bots:
-
-```html
-<!-- Somewhere in your page HTML, e.g. footer -->
+Den Einstiegslink in die `footer.php` des aktiven Themes einfügen:
+```php
+// wp-content/themes/dein-theme/footer.php
 <a href="/trap/labyrinth.php" style="display:none" tabindex="-1" aria-hidden="true">.</a>
 ```
 
-> **Why not just block bots?** Blocking reveals you know about them. A labyrinth silently wastes their compute budget instead.
+> Bei Theme-Updates geht der Footer-Eintrag verloren — besser ein **Child-Theme** nutzen oder einen `wp_footer`-Hook in der `functions.php`:
 
-### 4. Exclude from `robots.txt`
-
-The trap path must be **absent** from `robots.txt` (or explicitly allowed) so that bots *think* it's fair game:
-
-```
-# robots.txt — do NOT disallow your labyrinth path
-User-agent: *
-Disallow: /admin/
-Disallow: /api/
-# /trap/ is intentionally not listed here
+```php
+// functions.php des Child-Themes
+add_action('wp_footer', function () {
+    echo '<a href="/trap/labyrinth.php" style="display:none" tabindex="-1" aria-hidden="true">.</a>';
+});
 ```
 
-See [`robots.txt.example`](robots.txt.example) for a complete example.
+### Option B: Als Custom WordPress Page Template
+
+Für vollständige WordPress-Integration kann `labyrinth.php` als Page-Template angelegt werden. Achtung: Dann lädt WordPress den gesamten Bootstrap (DB-Verbindung, Plugins, etc.) mit — es sei denn, der WP-Bootstrap wird gezielt mit `define('SHORTINIT', true)` unterbunden.
+
+Diese Option ist nur sinnvoll, wenn du die WP-Rewrite-Engine für saubere URLs brauchst.
+
+---
+
+## Mögliche Konflikte
+
+| Situation | Problem | Lösung |
+|---|---|---|
+| **Security-Plugins** (Wordfence, iThemes) | Scannen den Labyrinth-Pfad selbst und lösen Alarme aus | Trap-Pfad in der Plugin-Whitelist eintragen oder den Pfad unscheinbarer benennen |
+| **Caching-Plugins / CDN** | Gecachte Seiten liefern immer dieselbe Seite — Bots laufen im Kreis der selben 1–2 Seiten | Trap-Pfad vom Cache ausschließen (z. B. in W3 Total Cache: „Never cache pages: `/trap/.*`") |
+| **`robots.txt` Plugins** | Plugins wie Yoast SEO können automatisch alle Nicht-WP-Pfade disallowed eintragen | Trap-Pfad in den Plugin-Einstellungen aus dem `robots.txt`-Block entfernen |
+| **WAF / Cloudflare Firewall** | Eigene WAF-Regeln können den Trap-Traffic blocken, bevor er PHP erreicht | Trap-Pfad in WAF-Bypass-Regeln aufnehmen (`uri contains /trap/ → skip`) |
+| **Rate Limiting** | Dein eigenes Rate Limiting blockt aggressive Bots, bevor sie tief ins Labyrinth laufen | Trap-Pfad vom Rate Limiting ausnehmen — du willst Bots möglichst viele Requests machen lassen |
+| **PHP `open_basedir`** | Restrictive `open_basedir`-Einstellungen können `require_once` für `config.php` blockieren | Beide Dateien im selben Verzeichnis ablegen oder `open_basedir` anpassen |
+| **Shared Hosting** | Kein Zugriff auf `error_log()` oder Logs nicht sichtbar | `LABYRINTH_LOG_VISITS` auf `false` setzen; alternativ in eine eigene Logdatei schreiben |
 
 ---
 
@@ -113,7 +194,7 @@ AI Labyrinth: IP=66.249.66.1 UA=Googlebot/2.1 page=3b4c1d2e depth=7
 
 Parse this with any log aggregator (grep, GoAccess, Loki, …) to see which bots are hitting the trap.
 
-### Example: count trap hits per IP (bash)
+### Beispiel: Trap-Hits pro IP zählen (bash)
 
 ```bash
 grep 'AI Labyrinth' /var/log/php/error.log | awk -F'IP=' '{print $2}' | cut -d' ' -f1 | sort | uniq -c | sort -rn | head
@@ -121,13 +202,68 @@ grep 'AI Labyrinth' /var/log/php/error.log | awk -F'IP=' '{print $2}' | cut -d' 
 
 ---
 
+## Datenschutz & IP-Speicherung
+
+> ⚠️ **Hinweis für Betreiber in der EU / DSGVO-Kontext**
+
+Wenn `LABYRINTH_LOG_VISITS` aktiviert ist, werden **IP-Adressen im PHP-Error-Log** gespeichert. Das dient ausschließlich der **temporären Abwehr von Angriffen** (Bots, Scraper, automatisierte Crawler) und ist technisch notwendig, um:
+
+- festzustellen, welche IPs den Trap aktiv ausnutzen
+- wiederkehrende Angreifer erkennen und blocken zu können (z. B. via `fail2ban`, Firewall-Rules)
+- die Effektivität der Maßnahme zu überprüfen
+
+### Rechtliche Einordnung
+
+Nach Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse) ist die **kurzfristige Speicherung von IP-Adressen zur Abwehr von Angriffen** in der Regel zulässig, wenn:
+
+1. die Speicherung **zeitlich begrenzt** ist (empfohlen: max. 7 Tage, im Idealfall 24–72 Stunden)
+2. die Daten **nicht zu anderen Zwecken** verwendet werden
+3. dies in der **Datenschutzerklärung** der Webseite erwähnt wird
+
+### Empfehlung zur Log-Rotation
+
+```bash
+# /etc/logrotate.d/php-labyrinth
+/var/log/php/error.log {
+    daily
+    rotate 3          # nur 3 Tage aufheben
+    compress
+    missingok
+    notifempty
+    postrotate
+        # PHP-FPM ggf. neu laden
+        systemctl reload php8.2-fpm 2>/dev/null || true
+    endscript
+}
+```
+
+### Wenn du keine IPs speichern möchtest
+
+In `config.php` einfach deaktivieren:
+
+```php
+define('LABYRINTH_LOG_VISITS', false);
+```
+
+Oder IPs vor dem Loggen hashen (Pseudonymisierung):
+
+```php
+// In labyrinth.php, Logging-Abschnitt anpassen:
+$hashed_ip = hash('sha256', ($client_ip ?? '') . 'your-salt-here');
+error_log("AI Labyrinth: IP={$hashed_ip} UA={$user_agent} page={$page_id} depth={$depth}");
+```
+
+> 💡 **Datenschutzerklärung**: Wenn du IP-Adressen loggst, ergänze deine Datenschutzerklärung um einen Hinweis wie: *„Bei Zugriffen auf Sicherheitsmechanismen unserer Website können IP-Adressen temporär (max. 7 Tage) zur Abwehr automatisierter Angriffe gespeichert werden."*
+
+---
+
 ## Apache Integration
 
-Use the included [`.htaccess.example`](.htaccess.example) to:
+Siehe [`htaccess.example`](.htaccess.example) für:
 
-- Rewrite `/research/articles` (clean URL) → `labyrinth.php`
-- Block direct access to `config.php`
-- Set caching headers
+- Clean-URL-Rewrite: `/research/articles` → `labyrinth.php`
+- Zugriff auf `config.php` blockieren
+- Caching-Header setzen
 
 ```apache
 RewriteEngine On
@@ -143,7 +279,7 @@ location /research/articles {
     try_files $uri /research/articles.php?$query_string;
 }
 
-# Block direct config access
+# config.php vor direktem Zugriff schützen
 location ~ /config\.php$ {
     deny all;
 }
@@ -151,21 +287,21 @@ location ~ /config\.php$ {
 
 ---
 
-## Security Notes
+## Sicherheitshinweise
 
-- `config.php` contains no secrets — it's safe to commit
-- Consider placing `config.php` outside the web root and adjusting the `require_once` path in `labyrinth.php` for extra caution
-- The trap never reads from or writes to a database, so there is no SQL injection surface
-- All output is run through `htmlspecialchars()` — no XSS risk from URL parameters
+- `config.php` enthält keine Secrets — sicher zu committen
+- Für zusätzliche Sicherheit `config.php` außerhalb des Web-Roots ablegen und den `require_once`-Pfad in `labyrinth.php` anpassen
+- Kein Datenbankzugriff — kein SQL-Injection-Risiko
+- Alle Ausgaben werden durch `htmlspecialchars()` gesichert — kein XSS-Risiko durch URL-Parameter
 
 ---
 
-## Customization Ideas
+## Weitere Ideen
 
-- **Multi-language**: Duplicate `config.php` per locale, serve based on `Accept-Language` header
-- **Domain-matched content**: Adjust topics to match your actual site niche for more convincing content
-- **Analytics integration**: Fire a server-side analytics event on each trap hit
-- **Rate-aware response**: Slow responses with `usleep()` for high-frequency crawlers
+- **Mehrsprachig**: `config.php` pro Locale duplizieren, anhand `Accept-Language`-Header ausliefern
+- **Themenpassend**: Topics an deine echten Seiteninhalte anpassen — je glaubwürdiger, desto effektiver
+- **Analytics-Event**: Bei jedem Trap-Hit einen Server-seitigen Event feuern (Umami, Plausible, Matomo)
+- **Künstliche Verzögerung**: `usleep(500000)` für hochfrequente Crawler — kostet dich kaum etwas, kostet den Bot Zeit
 
 ---
 
