@@ -287,6 +287,87 @@ location ~ /config\.php$ {
 
 ---
 
+## Caddy Integration
+
+```caddy
+# Caddyfile
+example.com {
+    # PHP via FPM (socket oder TCP)
+    php_fastcgi unix//run/php/php8.2-fpm.sock
+
+    # Clean URL: /trap/articles → labyrinth.php
+    rewrite /trap/articles* /trap/labyrinth.php?{query}
+
+    # config.php sperren
+    respond /trap/config.php 403
+}
+```
+
+> Caddy startet mit automatischem HTTPS — kein weiterer TLS-Aufwand nötig.
+
+---
+
+## Traefik Integration
+
+Traefik selbst leitet nur HTTP-Traffic weiter; PHP wird von einem dahinterliegenden Dienst (z. B. PHP-FPM-Container) ausgeführt. Die Labyrinth-Dateien liegen im Webserver-Container (Apache/Nginx), Traefik ist der Reverse Proxy davor.
+
+### Docker Compose Beispiel
+
+```yaml
+# docker-compose.yml
+services:
+  php-app:
+    image: php:8.2-apache          # oder nginx + php-fpm
+    volumes:
+      - ./trap:/var/www/html/trap   # labyrinth.php + config.php
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.labyrinth.rule=Host(`example.com`)"
+      - "traefik.http.routers.labyrinth.entrypoints=websecure"
+      - "traefik.http.routers.labyrinth.tls.certresolver=letsencrypt"
+      - "traefik.http.services.labyrinth.loadbalancer.server.port=80"
+
+  traefik:
+    image: traefik:v3
+    command:
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=deine@email.de"
+      - "--providers.docker=true"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./acme.json:/acme.json"
+```
+
+### Clean URL via Traefik Middleware (optional)
+
+Wenn du die `.php`-Endung aus der URL verstecken willst, ohne den Webserver anzufassen:
+
+```yaml
+labels:
+  # Middleware: /trap/articles → /trap/labyrinth.php
+  - "traefik.http.middlewares.labyrinth-rewrite.replacepathregex.regex=^/trap/articles(.*)"
+  - "traefik.http.middlewares.labyrinth-rewrite.replacepathregex.replacement=/trap/labyrinth.php$$1"
+  - "traefik.http.routers.labyrinth.middlewares=labyrinth-rewrite"
+```
+
+### config.php via Traefik sperren
+
+```yaml
+labels:
+  # Alle Requests auf config.php mit 403 abweisen
+  - "traefik.http.middlewares.block-config.redirectregex.regex=.*config\\.php.*"
+  - "traefik.http.middlewares.block-config.redirectregex.permanent=false"
+```
+
+> Alternativ (besser): `config.php` auf Webserver-Ebene sperren (`.htaccess` / Nginx `deny all`) — das ist zuverlässiger als eine Traefik-Middleware.
+
+---
+
 ## Sicherheitshinweise
 
 - `config.php` enthält keine Secrets — sicher zu committen
