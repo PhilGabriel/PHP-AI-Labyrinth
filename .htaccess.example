@@ -1,26 +1,76 @@
-# .htaccess example for PHP AI Labyrinth (Apache)
+# .htaccess for PHP AI Labyrinth (Apache)
 #
-# 1. Clean URL rewrite: /research/articles → labyrinth.php
-# 2. Block direct access to config.php
-# 3. Optional caching headers
+# Features
+#  1. Clean URL rewrite: /research/articles → labyrinth.php
+#  2. Bot Monitor: redirect AI crawlers hitting forbidden paths into the labyrinth
+#     (bot-monitor.php logs the attempt, then redirects to labyrinth.php)
+#  3. Honeypot path: /trap/ — list as Disallow in robots.txt so only
+#     non-compliant bots follow it; they land straight in the labyrinth
+#  4. Block direct access to config.php
+#  5. Security headers (X-Content-Type-Options, X-Frame-Options, CSP)
+#  6. Prevent directory listing
+
+# Prevent directory listing (OWASP A05)
+Options -Indexes
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
-    # Clean URL for the trap — bots see a "normal" path
+    # ── 1. Clean URL ─────────────────────────────────────────────────────────
     RewriteRule ^research/articles$   /research/articles.php   [L,QSA]
     RewriteRule ^research/articles/$  /research/articles.php   [L,QSA]
+
+    # ── 2. Bot Monitor ────────────────────────────────────────────────────────
+    # When a known AI crawler or scraper hits a forbidden/sensitive path, route
+    # it into bot-monitor.php (internal rewrite, not a visible redirect).
+    # bot-monitor.php logs the attempt and sends the bot to the AI Labyrinth.
+    #
+    # Prerequisites:
+    #  • bot-monitor.php must reside in the same directory as this .htaccess
+    #  • Adjust LABYRINTH_BASE_PATH in config.php to match your setup
+    #
+    # Skip requests already destined for the labyrinth or the monitor itself
+    RewriteCond %{REQUEST_URI} !^/research/articles [NC]
+    RewriteCond %{REQUEST_URI} !^/bot-monitor\.php  [NC]
+    # Match known AI/scraper bots by User-Agent substring (extend as needed).
+    # Tip: for large lists move this to a RewriteMap txt file and reference it
+    # with RewriteCond %{HTTP_USER_AGENT} ${botmap:%{HTTP_USER_AGENT}}
+    RewriteCond %{HTTP_USER_AGENT} (GPTBot|ClaudeBot|CCBot|anthropic\-ai|Bytespider|AhrefsBot|SemrushBot|MJ12bot|DotBot|DataForSeoBot|PetalBot|Omgilibot|ImagesiftBot|YouBot|Scrapy|python\-requests|Go\-http\-client) [NC]
+    # Match sensitive/forbidden paths — adapt to your site structure
+    RewriteCond %{REQUEST_URI} ^/(admin|api|private|wp\-admin|wp\-login\.php|xmlrpc\.php|\.env|\.git) [NC]
+    RewriteRule ^ /bot-monitor.php [L]
+
+    # ── 3. Honeypot path ──────────────────────────────────────────────────────
+    # Any request to /trap/ goes straight to the labyrinth.
+    # Add "Disallow: /trap/" in robots.txt — only non-compliant bots will follow.
+    RewriteCond %{REQUEST_URI} !^/bot-monitor\.php [NC]
+    RewriteRule ^trap/?$ /bot-monitor.php [L,NC]
 </IfModule>
 
-# Block direct access to the config file
+# ── Block direct access to the config file (OWASP A05) ───────────────────────
 <Files "config.php">
     Order Allow,Deny
     Deny from all
 </Files>
 
-# Optional: let bots cache pages to reduce your server load
+# ── Security & cache headers ──────────────────────────────────────────────────
 <IfModule mod_headers.c>
+    # Prevent MIME-type sniffing (OWASP A05)
+    Header always set X-Content-Type-Options "nosniff"
+    # Prevent clickjacking (OWASP A05)
+    Header always set X-Frame-Options "DENY"
+    # Minimal CSP: no external resources, inline styles allowed (labyrinth uses them)
+    Header always set Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'"
+    # Hide server technology fingerprints
+    Header always unset X-Powered-By
+
+    # Let bots cache labyrinth pages to reduce server load
     <FilesMatch "articles\.php$">
         Header set Cache-Control "public, max-age=3600"
     </FilesMatch>
 </IfModule>
+
+# ── Note on DDoS protection ───────────────────────────────────────────────────
+# For high-volume DDoS attacks, place a CDN or WAF (e.g. Cloudflare, AWS WAF)
+# in front of the server.  mod_evasive or mod_qos can provide additional
+# Apache-level rate limiting on top of the PHP rate limiter in config.php.

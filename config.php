@@ -101,3 +101,95 @@ $LABYRINTH_SUBHEADINGS = [
     'Fazit und Empfehlungen',
     'Nächste Schritte',
 ];
+
+// ---- Security & Rate Limiting ----
+
+// Rate-limit: max requests per IP per window (protects against DoS/DDoS)
+define('LABYRINTH_RATE_LIMIT_ENABLED', true);
+define('LABYRINTH_RATE_LIMIT_MAX',     60);  // requests per window
+define('LABYRINTH_RATE_LIMIT_WINDOW',  60);  // window size in seconds
+
+// Max length for the page_id URL parameter (prevents oversized input attacks)
+define('LABYRINTH_PAGE_ID_MAX_LENGTH', 64);
+
+// Max log entries written per IP per log window (prevents log flooding)
+define('LABYRINTH_LOG_MAX_PER_WINDOW', 5);
+
+/**
+ * File-based IP rate limiter.
+ *
+ * Returns true when the request is allowed, false when the IP has exceeded
+ * the configured limit.  Fails open (returns true) on any I/O error so a
+ * misconfigured temporary directory never takes the trap offline.
+ *
+ * @param string $ip     Client IP address (used as the rate-limit key)
+ * @param int    $max    Maximum requests allowed within $window seconds
+ * @param int    $window Sliding-window size in seconds
+ */
+function labyrinth_check_rate_limit(string $ip, int $max = LABYRINTH_RATE_LIMIT_MAX, int $window = LABYRINTH_RATE_LIMIT_WINDOW): bool
+{
+    if (!LABYRINTH_RATE_LIMIT_ENABLED) {
+        return true;
+    }
+
+    $dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'labyrinth_rl';
+    if (!is_dir($dir) && !@mkdir($dir, 0700, true)) {
+        return true; // fail open — can't create cache dir
+    }
+
+    // Sanitise the key so it is safe to use as a filename component
+    $safe = preg_replace('/[^a-fA-F0-9:._\-]/', '', $ip);
+    $file = $dir . DIRECTORY_SEPARATOR . md5($safe) . '.rl';
+
+    $fp = @fopen($file, 'c+');
+    if (!$fp) {
+        return true; // fail open
+    }
+
+    // Try a second time after 1 ms to reduce concurrency-driven fail-opens
+    // while still avoiding an indefinite block under very high load.
+    if (!@flock($fp, LOCK_EX | LOCK_NB)) {
+        usleep(1000);
+        if (!@flock($fp, LOCK_EX | LOCK_NB)) {
+            fclose($fp);
+            return true; // fail open after retry
+        }
+    }
+
+    $now  = time();
+    $raw  = stream_get_contents($fp);
+    $data = ($raw !== false && $raw !== '') ? json_decode($raw, true) : null;
+
+    if (!is_array($data) || !isset($data['r'])) {
+        $data = ['r' => []];
+    }
+
+    // Remove timestamps that fall outside the current sliding window
+    $data['r'] = array_values(
+        array_filter($data['r'], static fn(int $t): bool => $t > $now - $window)
+    );
+
+    $allowed = count($data['r']) < $max;
+    if ($allowed) {
+        $data['r'][] = $now;
+        ftruncate($fp, 0);
+        rewind($fp);
+        fwrite($fp, json_encode($data));
+    }
+
+    flock($fp, LOCK_UN);
+    fclose($fp);
+    return $allowed;
+}
+
+/**
+ * Strips ASCII control characters from a user-supplied string to prevent
+ * log-injection attacks (OWASP A09).
+ *
+ * @param string $value  Raw user-supplied string
+ * @param int    $maxLen Maximum allowed output length
+ */
+function labyrinth_sanitize_log(string $value, int $maxLen = 256): string
+{
+    return substr(preg_replace('/[\x00-\x1F\x7F]/', ' ', $value), 0, $maxLen);
+}
