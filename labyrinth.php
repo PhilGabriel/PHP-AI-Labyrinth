@@ -15,10 +15,23 @@
 
 require_once __DIR__ . '/config.php';
 
-// ---- URL parameters ----
+// ---- URL parameters — validate and sanitise (OWASP A03) ----
 
-$page_id = $_GET['p'] ?? '0';
-$depth   = intval($_GET['d'] ?? 0);
+// Allow only alphanumeric, dash, and underscore; enforce a hard length cap.
+$raw_page_id = $_GET['p'] ?? '0';
+$page_id     = substr(preg_replace('/[^a-zA-Z0-9_-]/', '', $raw_page_id), 0, LABYRINTH_PAGE_ID_MAX_LENGTH);
+if ($page_id === '') {
+    $page_id = '0';
+}
+$depth = max(0, intval($_GET['d'] ?? 0));
+
+// ---- Rate limiting (OWASP A04 — DoS/DDoS protection) ----
+
+if (!labyrinth_check_rate_limit($_SERVER['REMOTE_ADDR'] ?? '')) {
+    http_response_code(429);
+    header('Retry-After: 60');
+    exit;
+}
 
 // Reset depth at cap to prevent log explosion while keeping the loop alive
 if ($depth > LABYRINTH_MAX_DEPTH) {
@@ -57,19 +70,25 @@ for ($i = 0; $i < $num_links; $i++) {
 
 header('Content-Type: text/html; charset=UTF-8');
 header('X-Robots-Tag: noindex, nofollow');
+// Security headers (OWASP A05)
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'");
 
-// ---- Optional visit logging for bot monitoring ----
+// ---- Optional visit logging for bot monitoring (OWASP A09) ----
 
 if (LABYRINTH_LOG_VISITS) {
-    $client_ip  = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
-    error_log(sprintf(
-        'AI Labyrinth: IP=%s UA=%s page=%s depth=%d',
-        $client_ip,
-        $user_agent,
-        $page_id,
-        $depth
-    ));
+    $client_ip = filter_var($_SERVER['REMOTE_ADDR'] ?? '', FILTER_VALIDATE_IP) ?: 'invalid';
+    // Per-IP log rate limit prevents log flooding from aggressive crawlers
+    if (labyrinth_check_rate_limit('log_' . $client_ip, LABYRINTH_LOG_MAX_PER_WINDOW, 60)) {
+        error_log(sprintf(
+            'AI Labyrinth: IP=%s UA=%s page=%s depth=%d',
+            $client_ip,
+            labyrinth_sanitize_log($_SERVER['HTTP_USER_AGENT'] ?? 'unknown'),
+            labyrinth_sanitize_log($page_id),
+            $depth
+        ));
+    }
 }
 
 ?>

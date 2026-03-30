@@ -1,18 +1,18 @@
 # robots.txt example for a site using PHP AI Labyrinth
 #
-# The labyrinth path (/trap/ or /research/articles.php in this example)
-# must NOT be listed under Disallow — otherwise bots that respect robots.txt
-# will skip it and you lose the trap effect.
+# The labyrinth path (/research/articles.php in this example) must NOT be
+# listed under Disallow — otherwise bots that respect robots.txt will skip it
+# and you lose the trap effect.
 #
-# Only list paths you genuinely want crawlers to skip.
+# The /trap/ honeypot IS listed as Disallow so that compliant crawlers stay
+# away.  Only non-compliant, aggressive bots will follow it — and they land
+# straight in the AI Labyrinth via the bot-monitor.php redirect.
 
 User-agent: *
 Disallow: /admin/
 Disallow: /api/
 Disallow: /private/
-# /trap/ or /research/articles.php are intentionally absent
-
-# Optional: explicitly allow the trap path to make it extra tempting
-# Allow: /trap/
+Disallow: /trap/
+# /research/articles.php is intentionally absent — it is the labyrinth entry
 
 Sitemap: https://example.com/sitemap.xml
