@@ -183,13 +183,37 @@ function labyrinth_check_rate_limit(string $ip, int $max = LABYRINTH_RATE_LIMIT_
 }
 
 /**
- * Strips ASCII control characters from a user-supplied string to prevent
- * log-injection attacks (OWASP A09).
+ * Strips PHP code markers and ASCII control characters from a user-supplied
+ * string to prevent log-injection attacks (OWASP A09).
+ *
+ * PHP code markers are removed first (before control-character replacement) so
+ * that a bypass like "<\x00?php" cannot survive: if the control character were
+ * replaced first and removed as an empty string, the remaining "<" and "?"
+ * would form a valid PHP opening tag.  Replacing it with a space avoids this,
+ * but removing the marker first is the safer ordering.
+ *
+ * Patterns removed for defence-in-depth (covers PHP 5 ASP/script variants as
+ * well as the only PHP 7.4+ active forms "<?php" and "<?="):
+ *   - PHP open/close tags:  <?php, <?=, and bare <? (and matching ?>)
+ *   - Legacy ASP-style:     <% and %>  (including optional whitespace)
+ *   - Legacy script-tag:    <script language="php"> and </script>
+ *
+ * Control characters (\x00-\x1F, \x7F) are replaced with spaces to prevent
+ * log-line forging and terminal escape injection.
  *
  * @param string $value  Raw user-supplied string
  * @param int    $maxLen Maximum allowed output length
  */
 function labyrinth_sanitize_log(string $value, int $maxLen = 256): string
 {
-    return substr(preg_replace('/[\x00-\x1F\x7F]/', ' ', $value), 0, $maxLen);
+    // Remove PHP open/close tags: <?php, <?=, and bare <? (with optional whitespace
+    // for robustness), as well as the closing ?>.
+    $value = preg_replace('/<\s*\?(?:php|=)?|\?\s*>/i', '', $value);
+    // Remove legacy ASP-style tags: <% and %>
+    $value = preg_replace('/<\s*%|%\s*>/i', '', $value);
+    // Remove legacy PHP script tags specifically (language="php" attribute only)
+    $value = preg_replace('/<script\s[^>]*language\s*=\s*["\']?php["\']?[^>]*>|<\/script>/i', '', $value);
+    // Replace control characters with spaces to prevent log-line forging.
+    $value = preg_replace('/[\x00-\x1F\x7F]/', ' ', $value);
+    return substr($value, 0, $maxLen);
 }
