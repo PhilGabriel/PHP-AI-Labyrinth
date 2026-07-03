@@ -28,10 +28,21 @@ define('LABYRINTH_BASE_PATH', '/research/articles.php');
 // Enable error_log() output for monitoring bot visits
 define('LABYRINTH_LOG_VISITS', true);
 
-// Language / locale for date formatting
-define('LABYRINTH_LOCALE', 'de_DE.UTF-8');
+// Artificial response delay (tarpit) in milliseconds — slows crawlers down at
+// almost no cost to you. The actual delay is picked deterministically per page
+// from [MIN, MAX]. Set both to 0 to disable. Values are capped at 5000 ms to
+// keep a misconfiguration from tying up PHP workers (see README).
+define('LABYRINTH_DELAY_MIN_MS', 0);
+define('LABYRINTH_DELAY_MAX_MS', 0);
 
 // ---- Content pools (feel free to extend) ----
+
+// Month names used for the (deterministic) article dates. Replace these when
+// translating the labyrinth content into another language.
+$LABYRINTH_MONTHS = [
+    'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+    'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+];
 
 $LABYRINTH_TOPICS = [
     'Digitale Transformation in mittelständischen Unternehmen',
@@ -206,8 +217,10 @@ function labyrinth_check_rate_limit(string $ip, int $max = LABYRINTH_RATE_LIMIT_
  */
 function labyrinth_sanitize_log(string $value, int $maxLen = 256): string
 {
-    // Remove PHP open/close tags: <?php, <?=, and bare <? (with optional whitespace
-    // for robustness), as well as the closing ?>.
+    // Remove PHP open tags (php/short/echo variants, with optional whitespace
+    // for robustness) as well as the matching close tag. The close tag must
+    // not be spelled out here: PHP honors it even inside a one-line comment
+    // and would drop out of PHP mode, fataling the whole file.
     $value = preg_replace('/<\s*\?(?:php|=)?|\?\s*>/i', '', $value);
     // Remove legacy ASP-style tags: <% and %>
     $value = preg_replace('/<\s*%|%\s*>/i', '', $value);

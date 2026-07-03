@@ -6,7 +6,7 @@
 #     (bot-monitor.php logs the attempt, then redirects to labyrinth.php)
 #  3. Honeypot path: /trap/ — list as Disallow in robots.txt so only
 #     non-compliant bots follow it; they land straight in the labyrinth
-#  4. Block direct access to config.php
+#  4. Block direct access to config.php / generator.php
 #  5. Security headers (X-Content-Type-Options, X-Frame-Options, CSP)
 #  6. Prevent directory listing
 
@@ -35,23 +35,23 @@ Options -Indexes
     # Match known AI/scraper bots by User-Agent substring (extend as needed).
     # Tip: for large lists move this to a RewriteMap txt file and reference it
     # with RewriteCond %{HTTP_USER_AGENT} ${botmap:%{HTTP_USER_AGENT}}
-    RewriteCond %{HTTP_USER_AGENT} (GPTBot|ClaudeBot|CCBot|anthropic\-ai|Bytespider|AhrefsBot|SemrushBot|MJ12bot|DotBot|DataForSeoBot|PetalBot|Omgilibot|ImagesiftBot|YouBot|Scrapy|python\-requests|Go\-http\-client) [NC]
+    RewriteCond %{HTTP_USER_AGENT} (GPTBot|OAI\-SearchBot|ChatGPT\-User|ClaudeBot|Claude\-Web|Claude\-User|anthropic\-ai|CCBot|Bytespider|PerplexityBot|Perplexity\-User|meta\-externalagent|FacebookBot|Amazonbot|Applebot\-Extended|Diffbot|ImagesiftBot|Omgilibot|YouBot|PetalBot|AhrefsBot|SemrushBot|MJ12bot|DotBot|DataForSeoBot|Scrapy|python\-requests|python\-urllib|Go\-http\-client|node\-fetch|axios) [NC]
     # Match sensitive/forbidden paths — adapt to your site structure
     RewriteCond %{REQUEST_URI} ^/(admin|api|private|wp\-admin|wp\-login\.php|xmlrpc\.php|\.env|\.git) [NC]
     RewriteRule ^ /bot-monitor.php [L]
 
     # ── 3. Honeypot path ──────────────────────────────────────────────────────
-    # Any request to /trap/ goes straight to the labyrinth.
+    # Any request to /trap or below goes straight to the labyrinth.
     # Add "Disallow: /trap/" in robots.txt — only non-compliant bots will follow.
     RewriteCond %{REQUEST_URI} !^/bot-monitor\.php [NC]
-    RewriteRule ^trap/?$ /bot-monitor.php [L,NC]
+    RewriteRule ^trap(/.*)?$ /bot-monitor.php [L,NC]
 </IfModule>
 
-# ── Block direct access to the config file (OWASP A05) ───────────────────────
-<Files "config.php">
+# ── Block direct access to include files (OWASP A05) ─────────────────────────
+<FilesMatch "^(config|generator)\.php$">
     Order Allow,Deny
     Deny from all
-</Files>
+</FilesMatch>
 
 # ── Security & cache headers ──────────────────────────────────────────────────
 <IfModule mod_headers.c>

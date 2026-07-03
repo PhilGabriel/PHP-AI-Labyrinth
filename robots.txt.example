@@ -1,13 +1,35 @@
 # robots.txt example for a site using PHP AI Labyrinth
 #
-# The labyrinth path (/research/articles.php in this example) must NOT be
-# listed under Disallow — otherwise bots that respect robots.txt will skip it
-# and you lose the trap effect.
+# Three rules make the trap work:
 #
-# The /trap/ honeypot IS listed as Disallow so that compliant crawlers stay
-# away.  Only non-compliant, aggressive bots will follow it — and they land
-# straight in the AI Labyrinth via the bot-monitor.php redirect.
+# 1. The labyrinth path (/research/articles.php in this example) must NOT be
+#    listed under Disallow — otherwise bots that respect robots.txt will skip
+#    it and you lose the trap effect. Only the hidden entry link leads there.
+#
+# 2. The /trap/ honeypot IS listed as Disallow so that compliant crawlers stay
+#    away. Only non-compliant, aggressive bots follow it — and they land
+#    straight in the AI Labyrinth via bot-monitor.php.
+#
+# 3. AI crawlers you don't want on your site are told to stay off entirely.
+#    Compliant ones (most large operators) will honor this and leave. The ones
+#    that ignore it are exactly the ones the .htaccess bot-monitor rules and
+#    the honeypot are waiting for.
 
+# ---- 3. AI / LLM training crawlers: keep off the whole site -----------------
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: CCBot
+User-agent: Bytespider
+User-agent: PerplexityBot
+User-agent: meta-externalagent
+User-agent: Amazonbot
+User-agent: Applebot-Extended
+User-agent: Diffbot
+User-agent: ImagesiftBot
+User-agent: Omgilibot
+Disallow: /
+
+# ---- 1. + 2. Everyone else --------------------------------------------------
 User-agent: *
 Disallow: /admin/
 Disallow: /api/
