@@ -14,6 +14,7 @@
  */
 
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/generator.php';
 
 // ---- URL parameters — validate and sanitise (OWASP A03) ----
 
@@ -27,7 +28,9 @@ $depth = max(0, intval($_GET['d'] ?? 0));
 
 // ---- Rate limiting (OWASP A04 — DoS/DDoS protection) ----
 
-if (!labyrinth_check_rate_limit($_SERVER['REMOTE_ADDR'] ?? '')) {
+// Skipped in gateway mode: bot-monitor.php has already rate-limited this
+// request before including us, so checking again would double-count it.
+if (!defined('LABYRINTH_GATEWAY') && !labyrinth_check_rate_limit($_SERVER['REMOTE_ADDR'] ?? '')) {
     http_response_code(429);
     header('Retry-After: 60');
     exit;
@@ -46,9 +49,17 @@ mt_srand($seed);
 
 // ---- Pick content for this page ----
 
-$topic   = $LABYRINTH_TOPICS[mt_rand(0, count($LABYRINTH_TOPICS) - 1)];
+$topic   = labyrinth_gen_title($LABYRINTH_TOPICS[mt_rand(0, count($LABYRINTH_TOPICS) - 1)]);
 $author  = $LABYRINTH_AUTHORS[mt_rand(0, count($LABYRINTH_AUTHORS) - 1)];
-$date    = date('d. F Y', strtotime('-' . mt_rand(30, 800) . ' days'));
+
+// Deterministic publication date with localized month names: derived entirely
+// from the seed (stable across requests, so pages remain cacheable), spread
+// over the current and the two previous years.
+$date_year  = (int) date('Y') - mt_rand(0, 2);
+$date_month = ($date_year === (int) date('Y'))
+    ? mt_rand(1, (int) date('n'))
+    : mt_rand(1, 12);
+$date = mt_rand(1, 28) . '. ' . $LABYRINTH_MONTHS[$date_month - 1] . ' ' . $date_year;
 
 $num_paragraphs = mt_rand(LABYRINTH_PARAGRAPHS_MIN, LABYRINTH_PARAGRAPHS_MAX);
 $num_links      = mt_rand(LABYRINTH_LINKS_MIN, LABYRINTH_LINKS_MAX);
@@ -58,12 +69,24 @@ $num_links      = mt_rand(LABYRINTH_LINKS_MIN, LABYRINTH_LINKS_MAX);
 $links = [];
 for ($i = 0; $i < $num_links; $i++) {
     $link_id    = hash('crc32', $page_id . '_link_' . $i . '_' . mt_rand());
-    $link_topic = $LABYRINTH_TOPICS[mt_rand(0, count($LABYRINTH_TOPICS) - 1)];
+    $link_topic = labyrinth_gen_title($LABYRINTH_TOPICS[mt_rand(0, count($LABYRINTH_TOPICS) - 1)]);
     $links[]    = [
         'id'    => $link_id,
         'title' => $link_topic,
         'depth' => $depth + 1,
     ];
+}
+
+// ---- Optional tarpit delay ----
+//
+// Slows the crawler down without burning meaningful resources on our side.
+// Deterministic per page and hard-capped at 5 s so a config typo can never
+// tie up PHP workers indefinitely.
+
+$delay_min = max(0, min(5000, LABYRINTH_DELAY_MIN_MS));
+$delay_max = max($delay_min, min(5000, LABYRINTH_DELAY_MAX_MS));
+if ($delay_max > 0) {
+    usleep(mt_rand($delay_min, $delay_max) * 1000);
 }
 
 // ---- HTTP headers ----
@@ -77,7 +100,10 @@ header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'")
 
 // ---- Optional visit logging for bot monitoring (OWASP A09) ----
 
-if (LABYRINTH_LOG_VISITS) {
+// Skipped in gateway mode: bot-monitor.php has already logged this request
+// (with the original forbidden path), so logging again would waste the
+// per-IP log budget on a duplicate entry.
+if (LABYRINTH_LOG_VISITS && !defined('LABYRINTH_GATEWAY')) {
     $client_ip = filter_var($_SERVER['REMOTE_ADDR'] ?? '', FILTER_VALIDATE_IP) ?: 'invalid';
     // Per-IP log rate limit prevents log flooding from aggressive crawlers
     if (labyrinth_check_rate_limit('log_' . $client_ip, LABYRINTH_LOG_MAX_PER_WINDOW, 60)) {
@@ -132,6 +158,8 @@ if (LABYRINTH_LOG_VISITS) {
             font-family: sans-serif;
         }
         p { margin-bottom: 1.5rem; }
+        article ul { margin: 0 0 1.5rem 1.5rem; }
+        article li { margin-bottom: 0.5rem; }
         .related {
             margin-top: 3rem;
             padding-top: 2rem;
@@ -189,7 +217,11 @@ if (LABYRINTH_LOG_VISITS) {
     </div>
 
     <?php
-    $used = [];
+    // Mix procedurally generated paragraphs (the bulk — practically unlimited
+    // variety, so crawler deduplication never collapses the labyrinth) with an
+    // occasional paragraph from the hand-written pool and a bullet list.
+    $used     = [];
+    $had_list = false;
     for ($i = 0; $i < $num_paragraphs; $i++) {
         if ($i > 0 && $i % 2 === 0) {
             $sh_idx = intval($i / 2) - 1;
@@ -198,12 +230,27 @@ if (LABYRINTH_LOG_VISITS) {
             }
         }
 
-        do {
-            $p_idx = mt_rand(0, count($LABYRINTH_PARAGRAPHS) - 1);
-        } while (in_array($p_idx, $used) && count($used) < count($LABYRINTH_PARAGRAPHS));
+        $roll = mt_rand(0, 9);
+        if ($roll < 2 && count($used) < count($LABYRINTH_PARAGRAPHS)) {
+            // ~20 %: hand-written paragraph (each used at most once per page)
+            do {
+                $p_idx = mt_rand(0, count($LABYRINTH_PARAGRAPHS) - 1);
+            } while (in_array($p_idx, $used));
+            $used[] = $p_idx;
+            echo '<p>' . htmlspecialchars($LABYRINTH_PARAGRAPHS[$p_idx]) . '</p>';
+        } else {
+            echo '<p>' . htmlspecialchars(labyrinth_gen_paragraph()) . '</p>';
+        }
 
-        $used[] = $p_idx;
-        echo '<p>' . htmlspecialchars($LABYRINTH_PARAGRAPHS[$p_idx]) . '</p>';
+        // ~10 % of pages: one "best practices" bullet list mid-article
+        if (!$had_list && $i >= 1 && mt_rand(0, 9) === 0) {
+            $had_list = true;
+            echo '<p>Folgende Punkte haben sich in der Praxis bewährt:</p><ul>';
+            foreach (labyrinth_gen_list() as $item) {
+                echo '<li>' . htmlspecialchars($item) . '</li>';
+            }
+            echo '</ul>';
+        }
     }
     ?>
 </article>

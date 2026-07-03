@@ -4,8 +4,11 @@
  *
  * Intercepts requests from bots that attempt to access paths restricted in
  * .htaccess / robots.txt. Logs each intrusion attempt (IP, User-Agent, path)
- * and silently redirects the bot into the AI Labyrinth where it wastes tokens
+ * and silently serves the bot an AI Labyrinth page where it wastes tokens
  * following infinite fake content instead of receiving a plain 403.
+ *
+ * The labyrinth page is rendered directly (no Location redirect), so even
+ * bots that never follow redirects are fed fake content immediately.
  *
  * Usage
  * -----
@@ -14,7 +17,7 @@
  * request path, which is used here for logging.
  *
  * Direct HTTP access (without a prior rewrite) is harmless: the visitor is
- * simply redirected to the labyrinth entry page.
+ * simply served a labyrinth entry page.
  *
  * @see     .htaccess.example  for the required RewriteRule directives
  * @license MIT
@@ -65,16 +68,16 @@ if (LABYRINTH_LOG_VISITS) {
 
 $entry_page_id = 'trap_' . substr(md5($safe_path . $client_ip), 0, 16);
 
-// ---- Redirect into the AI Labyrinth --------------------------------------------
+// ---- Serve the AI Labyrinth entry page ------------------------------------------
 //
-// Validate LABYRINTH_BASE_PATH before use to prevent header injection in case
-// of misconfiguration (OWASP A05 — open redirect / header injection guard).
+// Render directly instead of issuing a 302: bots that ignore redirects are
+// fed fake content anyway, and there is one round-trip less per trapped hit.
+// LABYRINTH_GATEWAY tells labyrinth.php to skip its own rate-limit check and
+// visit logging — both already happened above for this request.
 
-$base = LABYRINTH_BASE_PATH;
-if (!preg_match('#^/[a-zA-Z0-9/_\-.]*\.php$#', $base)) {
-    // Fallback to a safe default if the constant is misconfigured
-    $base = '/labyrinth.php';
-}
+define('LABYRINTH_GATEWAY', true);
+$_GET['p'] = $entry_page_id;
+$_GET['d'] = '0';
 
-header('Location: ' . $base . '?p=' . urlencode($entry_page_id) . '&d=0', true, 302);
+require __DIR__ . '/labyrinth.php';
 exit;
